@@ -6,7 +6,7 @@
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
-> ⚠️ **Disclaimer:** This tool is for educational and legitimate business outreach only. Always comply with local spam/marketing laws (CAN-SPAM, GDPR). Use a burner account for outreach. The author is not responsible for bans or misuse.
+> ⚠️ **Disclaimer:** This tool is for educational and legitimate business outreach only. Always comply with local spam/marketing laws (CAN-SPAM, GDPR). Use a burner account for outreach. The author is not responsible for any bans or misuse.
 
 ---
 
