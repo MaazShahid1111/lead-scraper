@@ -1,0 +1,17 @@
+SUBJECT: Quick question about {business_name}
+
+Hi there,
+
+I was browsing Google Maps looking for {niche} services in {city} and came across {business_name}.
+
+I noticed you don't have a website yet. As a web developer, I'd love to offer you a FREE preview of what a professional site could look like for your business — no strings attached.
+
+If you're interested, just reply with:
+  • Your business name
+  • What services you offer
+  • Any specific features you'd like
+
+I'll have a custom preview ready within 24 hours.
+
+Best regards,
+{your_name}
