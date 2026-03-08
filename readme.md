@@ -12,7 +12,7 @@
 
 ## ✨ Features
 
-- **Google Maps Scraper** — finds businesses with email/phone but *no* website
+- **Google Maps Scraper** — finds businesses with email or phone but *no* website
 - **Email Validator** — free SMTP verification, zero API keys needed
 - **Cold Email Sender** — personalised Gmail outreach with rate-limit protection
 - **WhatsApp Sender** — scan QR once, auto-sends with long human-like delays
