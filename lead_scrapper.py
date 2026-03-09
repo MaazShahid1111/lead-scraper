@@ -136,6 +136,8 @@ EXAMPLES:
                    help='Output JSON file (default: {country}_leads.json)')
     p.add_argument('--no-headless', dest='headless', action='store_false', default=True,
                    help='Show browser window so you can watch it scrape live')
+    p.add_argument('--no-website-only', dest='no_website_only', action='store_true', default=False,
+                   help='Only collect businesses that have NO website (best cold outreach targets)')
 
     # ── VALIDATE ──────────────────────────────────────────────────────────────
     p = sub.add_parser(
@@ -268,6 +270,8 @@ NOTE: Get Gmail App Password at myaccount.google.com → Security → App Passwo
                    help='Business types (optional, uses defaults if not set)')
     p.add_argument('--no-headless',  dest='headless', action='store_false', default=True,
                    help='Show browser window live')
+    p.add_argument('--no-website-only', dest='no_website_only', action='store_true', default=False,
+                   help='Only collect businesses with NO website')
     p.add_argument('--from',         required=True, dest='gmail', metavar='EMAIL',
                    help='Your Gmail address')
     p.add_argument('--app-password', required=True, metavar='PASSWORD',

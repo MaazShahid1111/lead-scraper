@@ -73,6 +73,7 @@ CITY_LISTS = {
     'belarus': ['Minsk','Gomel','Mogilev','Vitebsk','Grodno'],
     'uae': ['Dubai','Abu Dhabi','Sharjah','Al Ain','Ajman','Ras al-Khaimah','Fujairah'],
     'saudi_arabia': ['Riyadh','Jeddah','Mecca','Medina','Dammam','Taif','Tabuk','Buraidah','Khamis Mushait'],
+    'israel': ['Jerusalem','Tel Aviv','Haifa','Rishon LeZion','Petah Tikva','Ashdod','Netanya','Beer Sheva'],
     'jordan': ['Amman','Zarqa','Irbid','Russeifa','Aqaba'],
     'lebanon': ['Beirut','Tripoli','Sidon','Tyre'],
     'kuwait': ['Kuwait City','Salmiya','Hawalli','Al Farwaniyah'],
@@ -196,29 +197,60 @@ def save(leads, filepath):
     print(f"💾 Saved {len(leads)} leads → {filepath}")
 
 
-async def _scrape(cities, niches, target, output_file, headless=True):
+
+async def _extract_email_from_website(page, url):
+    """Visit a business website and hunt for email addresses."""
+    try:
+        await page.goto(url, timeout=15000, wait_until='domcontentloaded')
+        await page.wait_for_timeout(1500)
+        text = await page.content()
+        m = re.search(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', text)
+        if m:
+            email = m.group(0).lower()
+            if is_valid_email(email) and not any(x in email for x in ['example','placeholder','sentry','wix','schema','wordpress']):
+                return email
+        for contact_path in ['/contact', '/contact-us', '/about']:
+            try:
+                await page.goto(url.rstrip('/') + contact_path, timeout=10000, wait_until='domcontentloaded')
+                await page.wait_for_timeout(800)
+                text2 = await page.content()
+                m2 = re.search(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', text2)
+                if m2:
+                    email = m2.group(0).lower()
+                    if is_valid_email(email) and not any(x in email for x in ['example','placeholder','sentry','wix','schema','wordpress']):
+                        return email
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None
+
+async def _scrape(cities, niches, target, output_file, headless=True, no_website_only=False):
     leads    = load_existing(output_file)
     initial  = len(leads)
-    existing = {l['email'] for l in leads}
+    existing = {l.get('email','') for l in leads if l.get('email')}
 
     print(f"🎯 Target: {target} leads  |  Currently: {initial}")
     print(f"🌍 Cities: {len(cities)}  |  Niches: {len(niches)}\n")
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(
             headless=headless,
-            args=['--disable-blink-features=AutomationControlled']
+            args=['--disable-blink-features=AutomationControlled','--no-sandbox']
         )
-        ctx  = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            viewport={'width': 1280, 'height': 720}
+        ctx = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={'width': 1366, 'height': 768}
         )
-        page = await ctx.new_page()
+        maps_page    = await ctx.new_page()
+        website_page = await ctx.new_page()
 
         try:
             for city in cities:
+                if len(leads) >= target:
+                    break
                 print(f"\n{'='*55}")
-                print(f"🏙️  {city}")
+                print(f"🏙  {city}")
                 print(f"{'='*55}")
 
                 for niche in niches:
@@ -226,120 +258,152 @@ async def _scrape(cities, niches, target, output_file, headless=True):
                         break
 
                     query = f"{niche} in {city}"
-                    print(f"  🔍 {niche}...", end=" ", flush=True)
-                    found = 0
+                    print(f"  🔍 Searching: {query}")
+                    found_this_niche = 0
 
                     try:
-                        await page.goto(
-                            f"https://www.google.com/maps/search/{query.replace(' ','+')}",
-                            timeout=20000
-                        )
-                        await page.wait_for_timeout(3000)
+                        url = f"https://www.google.com/maps/search/{query.replace(' ', '+')}"
+                        await maps_page.goto(url, timeout=60000, wait_until='domcontentloaded')
+                        await maps_page.wait_for_timeout(3500)
 
-                        for _ in range(3):
-                            await page.mouse.wheel(0, 2000)
-                            await page.wait_for_timeout(1000)
+                        for _ in range(5):
+                            await maps_page.keyboard.press('End')
+                            await maps_page.wait_for_timeout(800)
+                            try:
+                                feed = await maps_page.query_selector('div[role="feed"]')
+                                if feed:
+                                    await feed.evaluate('el => el.scrollTop += 2000')
+                            except Exception:
+                                pass
 
-                        listings = await page.query_selector_all('div[role="article"]')
+                        try:
+                            await maps_page.wait_for_selector('div[role="article"]', timeout=15000)
+                        except Exception:
+                            print(f"     ⚠️  No listings loaded — skipping")
+                            continue
+                        listings = await maps_page.query_selector_all('div[role="article"]')
+                        print(f"     Found {len(listings)} listings on map")
 
-                        for listing in listings[:15]:
+                        for listing in listings:
                             if len(leads) >= target:
                                 break
                             try:
                                 await listing.click()
-                                await page.wait_for_timeout(2000)
+                                await maps_page.wait_for_timeout(2500)
 
-                                # skip if has website
-                                if await page.query_selector('a[data-item-id="authority"]'):
-                                    continue
-
-                                # business name
+                                # Business name
                                 name = None
-                                for sel in ['h1.DUwDid','h1.DUO9ee','h1']:
-                                    el = await page.query_selector(sel)
+                                for sel in ['h1', 'h1.DUwDid', 'h1.DUO9ee']:
+                                    el = await maps_page.query_selector(sel)
                                     if el:
-                                        t = await el.inner_text()
-                                        if t and len(t) > 2:
+                                        t = (await el.inner_text()).strip()
+                                        if t and len(t) > 1:
                                             name = clean_name(t)
                                             break
                                 if not name:
                                     continue
 
-                                # email
-                                email = None
-                                for sel in ['button[data-item-id^="email"]','a[href^="mailto:"]','button[aria-label*="email" i]']:
-                                    el = await page.query_selector(sel)
+                                # Phone number
+                                phone = None
+                                for sel in ['button[data-item-id^="phone:tel:"]', 'button[aria-label*="phone" i]']:
+                                    el = await maps_page.query_selector(sel)
                                     if el:
-                                        for attr_name in ['data-item-id','href']:
-                                            v = await el.get_attribute(attr_name)
-                                            if v:
-                                                candidate = v.replace('email:','').replace('mailto:','').strip()
-                                                if is_valid_email(candidate):
-                                                    email = candidate.lower()
-                                                    break
-                                        if not email:
-                                            t = await el.inner_text()
-                                            candidate = extract_email(t)
-                                            if candidate and is_valid_email(candidate):
-                                                email = candidate.lower()
-                                    if email:
-                                        break
+                                        v = await el.get_attribute('data-item-id') or await el.get_attribute('aria-label') or ''
+                                        phone = v.replace('phone:tel:', '').replace('Phone:', '').strip()
+                                        if phone:
+                                            break
 
-                                if not email:
-                                    panel = await page.query_selector('div.m6QErb')
-                                    if panel:
-                                        t = await panel.inner_text()
-                                        candidate = extract_email(t)
-                                        if candidate and is_valid_email(candidate):
+                                # Website
+                                website = None
+                                for sel in ['a[data-item-id="authority"]', 'a[aria-label*="website" i]']:
+                                    el = await maps_page.query_selector(sel)
+                                    if el:
+                                        website = await el.get_attribute('href')
+                                        if website:
+                                            break
+
+                                # WhatsApp link on Maps panel
+                                whatsapp = None
+                                for sel in ['a[href*="whatsapp"]', 'a[aria-label*="whatsapp" i]', 'button[aria-label*="whatsapp" i]']:
+                                    el = await maps_page.query_selector(sel)
+                                    if el:
+                                        href = await el.get_attribute('href') or ''
+                                        if 'whatsapp' in href.lower() or 'wa.me' in href.lower():
+                                            whatsapp = href
+                                            break
+                                # Derive WhatsApp from phone if no direct link
+                                if not whatsapp and phone:
+                                    digits = re.sub(r'[^0-9]', '', phone)
+                                    if len(digits) >= 7:
+                                        whatsapp = f"https://wa.me/{digits}"
+
+                                # Email — check Maps panel first
+                                email = None
+                                for sel in ['a[href^="mailto:"]', 'button[data-item-id^="email"]']:
+                                    el = await maps_page.query_selector(sel)
+                                    if el:
+                                        v = await el.get_attribute('href') or await el.get_attribute('data-item-id') or ''
+                                        candidate = v.replace('mailto:', '').replace('email:', '').split('?')[0].strip()
+                                        if is_valid_email(candidate):
                                             email = candidate.lower()
+                                            break
 
-                                if not email or email in existing:
+                                # If has website, visit it for email
+                                if not email and website:
+                                    print(f"     🌐 Checking: {website[:55]}...")
+                                    email = await _extract_email_from_website(website_page, website)
+
+                                # Filter: skip businesses WITH a website if --no-website-only
+                                if no_website_only and website:
+                                    print(f"     ⏭  {name} — has website, skipping")
                                     continue
 
-                                # phone
-                                phone = None
-                                el = await page.query_selector('button[data-item-id^="phone:tel:"]')
-                                if el:
-                                    v = await el.get_attribute('data-item-id')
-                                    if v:
-                                        phone = v.replace('phone:tel:','').strip()
+                                # Must have email OR whatsapp/phone — skip if neither
+                                has_contact = email or whatsapp or phone
+                                if not has_contact:
+                                    print(f"     ⏭  {name} — no contact info")
+                                    continue
+
+                                # Skip duplicate emails
+                                if email and email in existing:
+                                    continue
+                                if email:
+                                    existing.add(email)
 
                                 lead = {
                                     'business_name': name,
-                                    'email':         email,
-                                    'phone':         phone,
+                                    'email':         email or '',
+                                    'phone':         phone or '',
+                                    'whatsapp':      whatsapp or '',
+                                    'has_website':   bool(website),
+                                    'website':       website or '',
                                     'city':          city,
                                     'niche':         niche,
                                     'status':        'pending',
                                     'contacted':     False,
-                                    'scraped_at':    datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                                    'scraped_at':    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                                 }
                                 leads.append(lead)
-                                existing.add(email)
-                                found += 1
-                                print(f"\n    ✅ {name} | {email}")
+                                found_this_niche += 1
 
-                                if len(leads) % 10 == 0:
+                                contact_str = f"{email or ''} | WA:{whatsapp[:30] if whatsapp else 'no'} | {phone or 'no phone'}"
+                                site_str    = '🌐 has site' if website else '🚫 no site'
+                                print(f"     ✅ #{len(leads)} {name} | {site_str} | {contact_str}")
+
+                                if len(leads) % 5 == 0:
                                     save(leads, output_file)
 
                             except Exception:
                                 continue
 
-                        print(f"({found} found)")
+                        print(f"  ✔  {niche}: {found_this_niche} leads\n")
 
                     except Exception as e:
-                        print(f"⚠️  {str(e)[:60]}")
-
-                if len(leads) >= target:
-                    break
+                        print(f"  ⚠️  {str(e)[:80]}")
 
         finally:
             save(leads, output_file)
             await browser.close()
-
-    print(f"\n{'='*55}")
-    print(f"✅ Done! Total: {len(leads)} | New: {len(leads)-initial}")
-    print(f"📁 File: {output_file}")
 
 
 def run_scrape(args):
@@ -349,10 +413,11 @@ def run_scrape(args):
     output  = args.output  if args.output  else f"{country}_leads.json"
     target  = args.target
     headless = getattr(args, 'headless', True)
+    no_website_only = getattr(args, 'no_website_only', False)
 
     if not cities:
         print(f"❌ No cities found for country: {country}")
         return
 
     print(f"🌍 Country: {country.upper()}")
-    asyncio.run(_scrape(cities, niches, target, output, headless))
+    asyncio.run(_scrape(cities, niches, target, output, headless, no_website_only))
