@@ -1,66 +1,48 @@
 @echo off
-:: ══════════════════════════════════════════════════════════════
-::  LEAD SCRAPER — Windows Installer
-:: ══════════════════════════════════════════════════════════════
-
-echo.
 echo ══════════════════════════════════════════════════════════════
 echo          LEAD SCRAPER — Windows Installer
 echo ══════════════════════════════════════════════════════════════
-echo.
 
-:: ── Python check ─────────────────────────────────────────────
-python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [X] Python not found!
-    echo     Download from: https://www.python.org/downloads/
-    echo     Make sure to check "Add Python to PATH" during install
-    pause
-    exit /b 1
+where python >nul 2>&1
+if errorlevel 1 (
+    echo [X] Python not found. Install from https://python.org
+    pause & exit /b 1
 )
-for /f "tokens=2" %%v in ('python --version') do echo [OK] Python %%v found
+for /f "tokens=*" %%i in ('python --version') do echo [OK] %%i found
 
-:: ── Virtual environment ───────────────────────────────────────
-echo [ ] Creating virtual environment...
+echo [->] Creating virtual environment...
 python -m venv venv
-if %errorlevel% neq 0 ( echo [X] venv creation failed & pause & exit /b 1 )
+if errorlevel 1 ( echo [X] venv creation failed & pause & exit /b 1 )
 echo [OK] venv created
 
-:: ── Activate and install ─────────────────────────────────────
-echo [ ] Installing Python packages...
-call venv\Scripts\activate.bat
-python -m pip install --upgrade pip -q
-pip install -r requirements.txt -q
-if %errorlevel% neq 0 ( echo [X] Package install failed & pause & exit /b 1 )
-echo [OK] Packages installed
+echo [->] Installing dependencies...
+venv\Scripts\pip install --upgrade pip -q
+venv\Scripts\pip install playwright dnspython requests beautifulsoup4 lxml tqdm colorama python-dotenv -q
+if errorlevel 1 ( echo [X] pip install failed & pause & exit /b 1 )
+echo [OK] Python packages installed
 
-:: ── Playwright browser ───────────────────────────────────────
-echo [ ] Installing Playwright browser...
-playwright install chromium
-if %errorlevel% neq 0 ( echo [X] Playwright install failed & pause & exit /b 1 )
+echo [->] Installing Playwright Chromium...
+venv\Scripts\python -m playwright install chromium
 echo [OK] Chromium installed
 
-:: ── Launcher bat ─────────────────────────────────────────────
-echo [ ] Creating launcher...
-(
-echo @echo off
-echo set DIR=%%~dp0
-echo call "%%DIR%%venv\Scripts\activate.bat"
-echo python "%%DIR%%lead_scraper.py" %%*
-) > lead_scraper_run.bat
+echo [->] Creating launcher...
+echo @echo off > lead_scraper_run.bat
+echo cd /d "%%~dp0" >> lead_scraper_run.bat
+echo call venv\Scripts\activate >> lead_scraper_run.bat
+echo python lead_scrapper.py %%* >> lead_scraper_run.bat
 echo [OK] Launcher created: lead_scraper_run.bat
 
 echo.
 echo ══════════════════════════════════════════════════════════════
-echo   INSTALLATION COMPLETE!
+echo   OK INSTALLATION COMPLETE!
 echo ══════════════════════════════════════════════════════════════
 echo.
 echo   Quick start:
+echo     venv\Scripts\activate
+echo     python lead_scrapper.py --help
 echo.
+echo   Or use launcher:
 echo     lead_scraper_run.bat --help
 echo     lead_scraper_run.bat scrape --country usa --target 100
-echo     lead_scraper_run.bat validate --file usa_leads.json
-echo     lead_scraper_run.bat email --file usa_leads_valid.json --from you@gmail.com --app-password "xxxx xxxx xxxx xxxx" --name "Your Name"
 echo.
-echo ══════════════════════════════════════════════════════════════
 pause

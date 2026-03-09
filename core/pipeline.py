@@ -1,13 +1,15 @@
 """Full pipeline: scrape → validate → email"""
 import asyncio
-from core.scraper_cmd   import run_scrape
-from core.validator_cmd import _validate
-from core.emailer_cmd   import run_email
 import json
 import os
 
 
 def run_all(args):
+    # Lazy imports to avoid circular import
+    from core.scraper_cmd   import run_scrape
+    from core.validator_cmd import _validate
+    from core.emailer_cmd   import run_email
+
     print("🚀 FULL PIPELINE: Scrape → Validate → Email\n")
 
     # Step 1: Scrape

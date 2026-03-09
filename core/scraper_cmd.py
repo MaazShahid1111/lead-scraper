@@ -1,154 +1,358 @@
-#!/usr/bin/env python3
-"""
-╔══════════════════════════════════════════════════════════════╗
-║              LEAD SCRAPER - Cold Outreach Tool               ║
-║   Scrape → Validate → Email / WhatsApp | Google Maps         ║
-╚══════════════════════════════════════════════════════════════╝
-"""
-
-import argparse
-import sys
+"""Scrape command handler"""
+import asyncio
+import json
 import os
+import re
+from datetime import datetime
+from playwright.async_api import async_playwright
 
-sys.path.insert(0, os.path.dirname(__file__))
+# ── Country city/niche configs ────────────────────────────────
+CITY_LISTS = {
+    'usa': ['New York NY','Los Angeles CA','Chicago IL','Houston TX','Phoenix AZ','Philadelphia PA','San Antonio TX','San Diego CA','Dallas TX','San Jose CA','Austin TX','Jacksonville FL','Fort Worth TX','Columbus OH','Charlotte NC','Indianapolis IN','San Francisco CA','Seattle WA','Denver CO','Nashville TN','Oklahoma City OK','El Paso TX','Washington DC','Las Vegas NV','Boston MA','Memphis TN','Louisville KY','Portland OR','Baltimore MD','Milwaukee WI','Albuquerque NM','Tucson AZ','Fresno CA','Mesa AZ','Sacramento CA','Kansas City MO','Atlanta GA','Omaha NE','Colorado Springs CO','Raleigh NC','Minneapolis MN','Miami FL','Tampa FL','New Orleans LA','Cleveland OH'],
+    'canada': ['Toronto ON','Vancouver BC','Montreal QC','Calgary AB','Edmonton AB','Ottawa ON','Winnipeg MB','Quebec City QC','Hamilton ON','Kitchener ON','London ON','Victoria BC','Halifax NS','Oshawa ON','Windsor ON','Saskatoon SK','Regina SK','Sherbrooke QC','St Johns NL','Barrie ON','Kelowna BC','Abbotsford BC','Kingston ON','Sudbury ON'],
+    'uk': ['London','Birmingham','Manchester','Glasgow','Leeds','Liverpool','Sheffield','Edinburgh','Bristol','Leicester','Bradford','Cardiff','Coventry','Nottingham','Kingston upon Hull','Belfast','Stoke-on-Trent','Wolverhampton','Plymouth','Derby','Southampton','Reading','Luton','Preston','Aberdeen','Swansea','Sunderland','Dundee','Oxford','Cambridge'],
+    'australia': ['Sydney NSW','Melbourne VIC','Brisbane QLD','Perth WA','Adelaide SA','Gold Coast QLD','Newcastle NSW','Canberra ACT','Sunshine Coast QLD','Wollongong NSW','Hobart TAS','Geelong VIC','Townsville QLD','Cairns QLD','Darwin NT','Toowoomba QLD','Ballarat VIC','Bendigo VIC'],
+    'ireland': ['Dublin','Cork','Limerick','Galway','Waterford','Drogheda','Dundalk','Swords','Bray','Navan','Ennis','Kilkenny','Carlow','Tralee'],
+    'new_zealand': ['Auckland','Wellington','Christchurch','Hamilton','Tauranga','Napier','Dunedin','Palmerston North','Nelson','Rotorua','New Plymouth','Whangarei'],
+    'mexico': ['Mexico City','Guadalajara','Monterrey','Puebla','Tijuana','Leon','Juarez','Zapopan','Merida','San Luis Potosi','Aguascalientes','Hermosillo','Mexicali','Culiacan','Acapulco','Queretaro','Morelia','Cancun','Veracruz'],
+    'brazil': ['Sao Paulo','Rio de Janeiro','Brasilia','Salvador','Fortaleza','Belo Horizonte','Manaus','Curitiba','Recife','Porto Alegre','Belem','Goiania','Guarulhos','Campinas','Sao Luis','Maceio','Natal'],
+    'argentina': ['Buenos Aires','Cordoba','Rosario','Mendoza','La Plata','Tucuman','Mar del Plata','Salta','Santa Fe','San Juan'],
+    'colombia': ['Bogota','Medellin','Cali','Barranquilla','Cartagena','Cucuta','Bucaramanga','Pereira','Santa Marta','Ibague','Manizales'],
+    'chile': ['Santiago','Valparaiso','Concepcion','La Serena','Antofagasta','Temuco','Rancagua','Talca','Arica','Iquique'],
+    'peru': ['Lima','Arequipa','Trujillo','Chiclayo','Piura','Iquitos','Cusco','Huancayo','Tacna'],
+    'venezuela': ['Caracas','Maracaibo','Valencia','Barquisimeto','Maracay','Ciudad Guayana','Maturin','Barcelona'],
+    'ecuador': ['Quito','Guayaquil','Cuenca','Santo Domingo','Machala','Manta','Ambato','Loja'],
+    'bolivia': ['La Paz','Santa Cruz','Cochabamba','Sucre','Oruro','Potosi'],
+    'paraguay': ['Asuncion','Ciudad del Este','San Lorenzo','Luque'],
+    'uruguay': ['Montevideo','Salto','Paysandu','Las Piedras'],
+    'panama': ['Panama City','San Miguelito','La Chorrera','David'],
+    'costa_rica': ['San Jose','Alajuela','Desamparados','Liberia'],
+    'guatemala': ['Guatemala City','Villa Nueva','Quetzaltenango','Escuintla','Mixco'],
+    'honduras': ['Tegucigalpa','San Pedro Sula','Choloma','La Ceiba'],
+    'el_salvador': ['San Salvador','Santa Ana','San Miguel','Mejicanos'],
+    'nicaragua': ['Managua','Leon','Masaya','Matagalpa'],
+    'cuba': ['Havana','Santiago de Cuba','Camaguey','Holguin'],
+    'dominican_republic': ['Santo Domingo','Santiago','La Romana','La Vega'],
+    'jamaica': ['Kingston','Spanish Town','Portmore','Montego Bay'],
+    'trinidad_tobago': ['Port of Spain','San Fernando','Arima','Chaguanas'],
+    'germany': ['Berlin','Hamburg','Munich','Cologne','Frankfurt','Stuttgart','Dusseldorf','Leipzig','Dortmund','Essen','Bremen','Dresden','Hanover','Nuremberg','Duisburg','Bochum','Wuppertal','Bielefeld','Bonn','Mannheim','Karlsruhe'],
+    'france': ['Paris','Marseille','Lyon','Toulouse','Nice','Nantes','Strasbourg','Montpellier','Bordeaux','Lille','Rennes','Reims','Saint-Etienne','Toulon','Le Havre','Grenoble','Dijon','Angers','Nimes','Aix-en-Provence'],
+    'italy': ['Rome','Milan','Naples','Turin','Palermo','Genoa','Bologna','Florence','Bari','Catania','Venice','Verona','Messina','Padua','Trieste','Brescia','Parma','Taranto','Prato','Modena'],
+    'spain': ['Madrid','Barcelona','Valencia','Seville','Zaragoza','Malaga','Murcia','Palma','Las Palmas','Bilbao','Alicante','Cordoba','Valladolid','Vigo','Gijon','Granada','A Coruna','Oviedo'],
+    'netherlands': ['Amsterdam','Rotterdam','The Hague','Utrecht','Eindhoven','Tilburg','Groningen','Almere','Breda','Nijmegen','Apeldoorn','Haarlem'],
+    'belgium': ['Brussels','Antwerp','Ghent','Charleroi','Liege','Bruges','Namur','Leuven','Mons','Aalst'],
+    'portugal': ['Lisbon','Porto','Amadora','Braga','Setubal','Coimbra','Funchal','Almada','Aveiro','Viseu'],
+    'poland': ['Warsaw','Krakow','Lodz','Wroclaw','Poznan','Gdansk','Szczecin','Bydgoszcz','Lublin','Katowice','Bialystok','Gdynia'],
+    'sweden': ['Stockholm','Gothenburg','Malmo','Uppsala','Vasteras','Orebro','Linkoping','Helsingborg','Jonkoping','Norrkoping'],
+    'norway': ['Oslo','Bergen','Stavanger','Trondheim','Drammen','Fredrikstad','Kristiansand','Sandnes','Tromso'],
+    'denmark': ['Copenhagen','Aarhus','Odense','Aalborg','Esbjerg','Vejle','Randers','Viborg','Kolding'],
+    'finland': ['Helsinki','Espoo','Tampere','Vantaa','Oulu','Turku','Jyvaskyla','Lahti','Kuopio'],
+    'switzerland': ['Zurich','Geneva','Basel','Bern','Lausanne','Winterthur','St Gallen','Lucerne','Biel','Thun'],
+    'austria': ['Vienna','Graz','Linz','Salzburg','Innsbruck','Klagenfurt','Villach','Wels','St Polten'],
+    'czech_republic': ['Prague','Brno','Ostrava','Plzen','Liberec','Olomouc','Usti nad Labem','Hradec Kralove','Pardubice'],
+    'hungary': ['Budapest','Debrecen','Miskolc','Szeged','Pecs','Gyor','Nyiregyhaza','Kecskemet'],
+    'romania': ['Bucharest','Cluj-Napoca','Timisoara','Iasi','Constanta','Craiova','Brasov','Galati','Ploiesti'],
+    'greece': ['Athens','Thessaloniki','Patras','Heraklion','Larissa','Volos','Ioannina','Kavala','Rhodes'],
+    'ukraine': ['Kyiv','Kharkiv','Odessa','Dnipro','Zaporizhzhia','Lviv','Kryvyi Rih','Mykolaiv'],
+    'russia': ['Moscow','Saint Petersburg','Novosibirsk','Yekaterinburg','Nizhny Novgorod','Kazan','Chelyabinsk','Omsk','Samara','Rostov-on-Don','Ufa','Krasnoyarsk','Perm','Voronezh','Volgograd'],
+    'turkey': ['Istanbul','Ankara','Izmir','Bursa','Adana','Gaziantep','Konya','Antalya','Kayseri','Diyarbakir','Mersin','Eskisehir'],
+    'croatia': ['Zagreb','Split','Rijeka','Osijek','Zadar'],
+    'serbia': ['Belgrade','Novi Sad','Nis','Kragujevac','Subotica'],
+    'slovakia': ['Bratislava','Kosice','Presov','Zilina','Nitra'],
+    'bulgaria': ['Sofia','Plovdiv','Varna','Burgas','Ruse','Stara Zagora'],
+    'lithuania': ['Vilnius','Kaunas','Klaipeda','Siauliai','Panevezys'],
+    'latvia': ['Riga','Daugavpils','Liepaja','Jelgava','Jurmala'],
+    'estonia': ['Tallinn','Tartu','Narva','Parnu'],
+    'slovenia': ['Ljubljana','Maribor','Celje','Kranj'],
+    'luxembourg': ['Luxembourg City','Esch-sur-Alzette','Differdange'],
+    'iceland': ['Reykjavik','Kopavogur','Hafnarfjordur','Akureyri'],
+    'albania': ['Tirana','Durres','Vlore','Elbasan','Shkoder'],
+    'north_macedonia': ['Skopje','Bitola','Kumanovo','Prilep','Tetovo'],
+    'bosnia': ['Sarajevo','Banja Luka','Tuzla','Zenica','Mostar'],
+    'moldova': ['Chisinau','Tiraspol','Balti','Bender'],
+    'belarus': ['Minsk','Gomel','Mogilev','Vitebsk','Grodno'],
+    'uae': ['Dubai','Abu Dhabi','Sharjah','Al Ain','Ajman','Ras al-Khaimah','Fujairah'],
+    'saudi_arabia': ['Riyadh','Jeddah','Mecca','Medina','Dammam','Taif','Tabuk','Buraidah','Khamis Mushait'],
+    'jordan': ['Amman','Zarqa','Irbid','Russeifa','Aqaba'],
+    'lebanon': ['Beirut','Tripoli','Sidon','Tyre'],
+    'kuwait': ['Kuwait City','Salmiya','Hawalli','Al Farwaniyah'],
+    'qatar': ['Doha','Al Rayyan','Umm Salal','Al Wakrah'],
+    'bahrain': ['Manama','Riffa','Muharraq','Hamad Town'],
+    'oman': ['Muscat','Seeb','Salalah','Bawshar','Sohar'],
+    'iraq': ['Baghdad','Basra','Mosul','Erbil','Sulaymaniyah','Kirkuk'],
+    'iran': ['Tehran','Mashhad','Isfahan','Karaj','Tabriz','Shiraz','Ahvaz'],
+    'pakistan': ['Karachi','Lahore','Faisalabad','Rawalpindi','Islamabad','Gujranwala','Peshawar','Multan','Hyderabad','Quetta','Sialkot','Bahawalpur'],
+    'india': ['Mumbai','Delhi','Bangalore','Hyderabad','Chennai','Kolkata','Pune','Ahmedabad','Surat','Jaipur','Lucknow','Kanpur','Nagpur','Indore','Thane','Bhopal','Visakhapatnam','Patna','Vadodara','Ludhiana','Agra','Nashik','Varanasi','Meerut','Rajkot','Aurangabad','Dhanbad','Amritsar','Ranchi','Allahabad','Coimbatore','Faridabad'],
+    'bangladesh': ['Dhaka','Chittagong','Khulna','Rajshahi','Sylhet','Comilla','Mymensingh','Narayanganj','Gazipur'],
+    'sri_lanka': ['Colombo','Dehiwala','Moratuwa','Kandy','Negombo','Jaffna'],
+    'nepal': ['Kathmandu','Pokhara','Lalitpur','Biratnagar','Birgunj','Bharatpur'],
+    'indonesia': ['Jakarta','Surabaya','Bandung','Medan','Bekasi','Tangerang','Depok','Semarang','Palembang','Makassar','Batam','Pekanbaru','Bogor','Malang','Yogyakarta','Denpasar'],
+    'philippines': ['Manila','Quezon City','Davao','Caloocan','Zamboanga','Cebu City','Antipolo','Pasig','Taguig','Valenzuela','Cagayan de Oro'],
+    'vietnam': ['Ho Chi Minh City','Hanoi','Da Nang','Hai Phong','Bien Hoa','Nha Trang','Can Tho','Hue','Da Lat'],
+    'thailand': ['Bangkok','Nonthaburi','Pak Kret','Hat Yai','Chiang Mai','Pattaya','Khon Kaen','Udon Thani','Nakhon Ratchasima'],
+    'malaysia': ['Kuala Lumpur','George Town','Ipoh','Shah Alam','Petaling Jaya','Johor Bahru','Subang Jaya','Miri','Kota Kinabalu','Kuching'],
+    'singapore': ['Singapore','Jurong','Woodlands','Tampines','Sengkang'],
+    'myanmar': ['Yangon','Mandalay','Naypyidaw','Mawlamyine'],
+    'cambodia': ['Phnom Penh','Siem Reap','Battambang','Kampong Cham'],
+    'laos': ['Vientiane','Savannakhet','Pakse','Luang Prabang'],
+    'china': ['Shanghai','Beijing','Guangzhou','Shenzhen','Tianjin','Chongqing','Chengdu','Nanjing','Wuhan','Xian','Hangzhou','Shenyang','Harbin','Qingdao','Jinan','Zhengzhou','Dalian','Dongguan','Changsha','Kunming','Changchun','Wenzhou','Xiamen','Fuzhou'],
+    'japan': ['Tokyo','Yokohama','Osaka','Nagoya','Sapporo','Kobe','Kyoto','Fukuoka','Kawasaki','Saitama','Hiroshima','Sendai','Chiba','Kitakyushu','Niigata','Hamamatsu','Kumamoto','Okayama'],
+    'south_korea': ['Seoul','Busan','Incheon','Daegu','Daejeon','Gwangju','Suwon','Ulsan','Seongnam','Goyang','Bucheon'],
+    'taiwan': ['Taipei','Kaohsiung','Taichung','Tainan','Banqiao','Zhongli','Hsinchu','Keelung'],
+    'hong_kong': ['Hong Kong','Kowloon','Tsuen Wan','Sha Tin','Tuen Mun'],
+    'mongolia': ['Ulaanbaatar','Erdenet','Darkhan'],
+    'kazakhstan': ['Almaty','Nur-Sultan','Shymkent','Karaganda','Aktobe'],
+    'uzbekistan': ['Tashkent','Samarkand','Namangan','Andijan'],
+    'nigeria': ['Lagos','Kano','Ibadan','Abuja','Port Harcourt','Benin City','Maiduguri','Zaria','Aba','Jos','Ilorin','Enugu'],
+    'south_africa': ['Johannesburg','Cape Town','Durban','Pretoria','Port Elizabeth','Pietermaritzburg','Benoni','Tembisa','East London'],
+    'kenya': ['Nairobi','Mombasa','Nakuru','Ruiru','Eldoret','Kisumu'],
+    'ethiopia': ['Addis Ababa','Dire Dawa','Nazret','Bahir Dar','Mekelle','Gondar'],
+    'ghana': ['Accra','Kumasi','Tamale','Sekondi-Takoradi'],
+    'tanzania': ['Dar es Salaam','Mwanza','Arusha','Dodoma'],
+    'egypt': ['Cairo','Alexandria','Giza','Shubra El Kheima','Port Said','Suez','Luxor','Aswan','Mansoura','Tanta'],
+    'morocco': ['Casablanca','Fez','Tangier','Marrakech','Sale','Meknes','Rabat','Oujda','Kenitra','Agadir'],
+    'algeria': ['Algiers','Oran','Constantine','Batna','Djelfa','Setif','Annaba'],
+    'tunisia': ['Tunis','Sfax','Sousse','Kairouan','Gabes'],
+    'senegal': ['Dakar','Thies','Touba','Kaolack'],
+    'ivory_coast': ['Abidjan','Abobo','Bouake','Korhogo','Daloa'],
+    'cameroon': ['Douala','Yaounde','Garoua','Bamenda','Bafoussam'],
+    'angola': ['Luanda','Lubango','Huambo','Lobito','Benguela'],
+    'mozambique': ['Maputo','Matola','Beira','Nampula','Chimoio'],
+    'zambia': ['Lusaka','Kitwe','Ndola','Livingstone'],
+    'zimbabwe': ['Harare','Bulawayo','Chitungwiza','Mutare'],
+    'madagascar': ['Antananarivo','Toamasina','Antsirabe','Fianarantsoa'],
+    'uganga': ['Kampala','Gulu','Lira','Mbarara','Jinja'],
+    'rwanda': ['Kigali','Butare','Gitarama','Musanze'],
+    'haiti': ['Port-au-Prince','Carrefour','Delmas','Cap-Haitien'],
+    'puerto_rico': ['San Juan','Bayamon','Carolina','Ponce','Caguas'],
+    'papua_new_guinea': ['Port Moresby','Lae','Mount Hagen','Madang'],
+    'fiji': ['Suva','Lautoka','Nadi'],
+}
 
-from core.scraper_cmd   import run_scrape
-from core.validator_cmd import run_validate
-from core.emailer_cmd   import run_email
-from core.whatsapp_cmd  import run_whatsapp
-from core.pipeline      import run_all
+COUNTRY_ALIASES = {
+    'us': 'usa', 'united_states': 'usa', 'america': 'usa',
+    'united_kingdom': 'uk', 'england': 'uk', 'britain': 'uk',
+    'emirates': 'uae', 'united_arab_emirates': 'uae',
+    'korea': 'south_korea', 'south korea': 'south_korea',
+    'nz': 'new_zealand', 'new zealand': 'new_zealand',
+    'sa': 'south_africa', 'south africa': 'south_africa',
+    'czech': 'czech_republic', 'czechia': 'czech_republic',
+    'dr': 'dominican_republic',
+    'trinidad': 'trinidad_tobago', 'tt': 'trinidad_tobago',
+    'png': 'papua_new_guinea',
+    'ivory_coast': 'ivory_coast', 'cote_divoire': 'ivory_coast',
+}
+
+def resolve_country(name):
+    key = name.lower().strip().replace('-', '_').replace(' ', '_')
+    return COUNTRY_ALIASES.get(key, key)
 
 
-BANNER = """
-╔══════════════════════════════════════════════════════════════╗
-║            LEAD SCRAPER  —  Cold Outreach Tool               ║
-║       Scrape → Validate → Email / WhatsApp                   ║
-╚══════════════════════════════════════════════════════════════╝
-"""
+DEFAULT_NICHES = [
+    "Coffee Shop", "Cafe", "Bakery", "Restaurant", "Food Truck",
+    "Gym", "Fitness Studio", "Yoga Studio",
+    "Hair Salon", "Barber Shop", "Nail Salon", "Spa",
+    "Roofing Contractor", "Landscaping Service", "Cleaning Service",
+    "Plumber", "Electrician", "Handyman", "Painter", "HVAC",
+    "Auto Repair", "Car Wash", "Pet Grooming", "Florist",
+    "Tattoo Shop", "Photography Studio",
+]
 
 
-def build_parser():
-    parser = argparse.ArgumentParser(
-        prog='lead_scraper',
-        description='Automated lead generation & cold outreach tool',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-EXAMPLES:
-  # Scrape 500 USA businesses (no website, has email/phone)
-  python lead_scraper.py scrape --country usa --target 500
-
-  # Validate collected emails (free SMTP — no API needed)
-  python lead_scraper.py validate --file usa_leads.json
-
-  # Send cold emails (20/day limit recommended)
-  python lead_scraper.py email --file usa_leads_valid.json \\
-      --from you@gmail.com --app-password "xxxx xxxx xxxx xxxx" \\
-      --name "Your Name" --limit 20
-
-  # Send WhatsApp messages (opens browser, scan QR once)
-  python lead_scraper.py whatsapp --file usa_leads.json \\
-      --name "Your Name" --limit 30
-
-  # Run full pipeline: scrape → validate → email
-  python lead_scraper.py all --country usa --target 100 \\
-      --from you@gmail.com --app-password "xxxx xxxx xxxx xxxx" \\
-      --name "Your Name"
-
-COUNTRIES:  usa  uk  canada  australia  ireland  new_zealand
-        """
-    )
-
-    sub = parser.add_subparsers(dest='command', metavar='COMMAND')
-    sub.required = True
-
-    # ── SCRAPE ────────────────────────────────────────────────
-    p = sub.add_parser('scrape', help='Scrape Google Maps for leads')
-    p.add_argument('--country',    required=True,
-                   choices=['usa','uk','canada','australia','ireland','new_zealand'])
-    p.add_argument('--target',     type=int, default=500, metavar='N',
-                   help='Stop after N leads (default: 500)')
-    p.add_argument('--cities',     nargs='+', metavar='CITY')
-    p.add_argument('--niches',     nargs='+', metavar='NICHE')
-    p.add_argument('--output',     default=None, metavar='FILE')
-    p.add_argument('--no-headless', dest='headless', action='store_false', default=True,
-                   help='Show browser window')
-
-    # ── VALIDATE ──────────────────────────────────────────────
-    p = sub.add_parser('validate', help='Verify emails via free SMTP')
-    p.add_argument('--file',   required=True, metavar='FILE')
-    p.add_argument('--delay',  type=float, default=2.0, metavar='SECS')
-    p.add_argument('--output', default=None, metavar='FILE')
-
-    # ── EMAIL ─────────────────────────────────────────────────
-    p = sub.add_parser('email', help='Send cold emails via Gmail SMTP')
-    p.add_argument('--file',         required=True, metavar='FILE')
-    p.add_argument('--from',         required=True, dest='gmail', metavar='EMAIL')
-    p.add_argument('--app-password', required=True, metavar='PASSWORD')
-    p.add_argument('--name',         required=True, metavar='NAME')
-    p.add_argument('--limit',        type=int, default=20, metavar='N')
-    p.add_argument('--delay-min',    type=int, default=3,  metavar='SECS')
-    p.add_argument('--delay-max',    type=int, default=8,  metavar='SECS')
-    p.add_argument('--template',     default=None, metavar='FILE')
-
-    # ── WHATSAPP ──────────────────────────────────────────────
-    p = sub.add_parser('whatsapp',
-        help='Send WhatsApp messages (opens browser, scan QR once)',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="""
-Send WhatsApp messages to leads that have phone numbers.
-
-Opens a real Chrome window → you scan QR once → it sends automatically.
-Uses long random delays (configurable) to avoid bans.
-        """
-    )
-    p.add_argument('--file',            required=True, metavar='FILE',
-                   help='JSON leads file with phone numbers')
-    p.add_argument('--name',            required=True, metavar='NAME',
-                   help='Your name for message signature')
-    p.add_argument('--limit',           type=int, default=30, metavar='N',
-                   help='Max messages to send this session (default: 30)')
-    p.add_argument('--template',        default=None, metavar='FILE',
-                   help='Custom message template file')
-    p.add_argument('--delay-min',       type=int, default=8,  metavar='MINS',
-                   help='Min minutes between messages (default: 8)')
-    p.add_argument('--delay-max',       type=int, default=18, metavar='MINS',
-                   help='Max minutes between messages (default: 18)')
-    p.add_argument('--batch-min',       type=int, default=3,  metavar='N',
-                   help='Min messages per batch before long break (default: 3)')
-    p.add_argument('--batch-max',       type=int, default=6,  metavar='N',
-                   help='Max messages per batch before long break (default: 6)')
-    p.add_argument('--batch-pause-min', type=int, default=45, metavar='MINS',
-                   help='Min minutes for long batch break (default: 45)')
-    p.add_argument('--batch-pause-max', type=int, default=90, metavar='MINS',
-                   help='Max minutes for long batch break (default: 90)')
-
-    # ── ALL ───────────────────────────────────────────────────
-    p = sub.add_parser('all', help='Full pipeline: scrape → validate → email')
-    p.add_argument('--country',      required=True,
-                   choices=['usa','uk','canada','australia','ireland','new_zealand'])
-    p.add_argument('--target',       type=int, default=100)
-    p.add_argument('--from',         required=True, dest='gmail')
-    p.add_argument('--app-password', required=True)
-    p.add_argument('--name',         required=True)
-    p.add_argument('--limit',        type=int, default=20)
-
-    return parser
+def is_valid_email(email):
+    if not email:
+        return False
+    return bool(re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email))
 
 
-def main():
-    print(BANNER)
-    parser = build_parser()
-    args   = parser.parse_args()
-
-    dispatch = {
-        'scrape':    run_scrape,
-        'validate':  run_validate,
-        'email':     run_email,
-        'whatsapp':  run_whatsapp,
-        'all':       run_all,
-    }
-    dispatch[args.command](args)
+def extract_email(text):
+    if not text:
+        return None
+    m = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
+    return m.group(0) if m else None
 
 
-if __name__ == '__main__':
-    main()
+def clean_name(name):
+    if not name:
+        return 'Unknown'
+    for s in ['Ltd','Limited','LTD','LLC','Inc','Corp','Pty','L.L.C.']:
+        name = re.sub(rf'\b{s}\.?\b', '', name, flags=re.IGNORECASE)
+    return ' '.join(name.split()).strip()
+
+
+def load_existing(filepath):
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            pass
+    return []
+
+
+def save(leads, filepath):
+    with open(filepath, 'w', encoding='utf-8') as f:
+        json.dump(leads, f, indent=2, ensure_ascii=False)
+    print(f"💾 Saved {len(leads)} leads → {filepath}")
+
+
+async def _scrape(cities, niches, target, output_file, headless=True):
+    leads    = load_existing(output_file)
+    initial  = len(leads)
+    existing = {l['email'] for l in leads}
+
+    print(f"🎯 Target: {target} leads  |  Currently: {initial}")
+    print(f"🌍 Cities: {len(cities)}  |  Niches: {len(niches)}\n")
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            headless=headless,
+            args=['--disable-blink-features=AutomationControlled']
+        )
+        ctx  = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            viewport={'width': 1280, 'height': 720}
+        )
+        page = await ctx.new_page()
+
+        try:
+            for city in cities:
+                print(f"\n{'='*55}")
+                print(f"🏙️  {city}")
+                print(f"{'='*55}")
+
+                for niche in niches:
+                    if len(leads) >= target:
+                        break
+
+                    query = f"{niche} in {city}"
+                    print(f"  🔍 {niche}...", end=" ", flush=True)
+                    found = 0
+
+                    try:
+                        await page.goto(
+                            f"https://www.google.com/maps/search/{query.replace(' ','+')}",
+                            timeout=20000
+                        )
+                        await page.wait_for_timeout(3000)
+
+                        for _ in range(3):
+                            await page.mouse.wheel(0, 2000)
+                            await page.wait_for_timeout(1000)
+
+                        listings = await page.query_selector_all('div[role="article"]')
+
+                        for listing in listings[:15]:
+                            if len(leads) >= target:
+                                break
+                            try:
+                                await listing.click()
+                                await page.wait_for_timeout(2000)
+
+                                # skip if has website
+                                if await page.query_selector('a[data-item-id="authority"]'):
+                                    continue
+
+                                # business name
+                                name = None
+                                for sel in ['h1.DUwDid','h1.DUO9ee','h1']:
+                                    el = await page.query_selector(sel)
+                                    if el:
+                                        t = await el.inner_text()
+                                        if t and len(t) > 2:
+                                            name = clean_name(t)
+                                            break
+                                if not name:
+                                    continue
+
+                                # email
+                                email = None
+                                for sel in ['button[data-item-id^="email"]','a[href^="mailto:"]','button[aria-label*="email" i]']:
+                                    el = await page.query_selector(sel)
+                                    if el:
+                                        for attr_name in ['data-item-id','href']:
+                                            v = await el.get_attribute(attr_name)
+                                            if v:
+                                                candidate = v.replace('email:','').replace('mailto:','').strip()
+                                                if is_valid_email(candidate):
+                                                    email = candidate.lower()
+                                                    break
+                                        if not email:
+                                            t = await el.inner_text()
+                                            candidate = extract_email(t)
+                                            if candidate and is_valid_email(candidate):
+                                                email = candidate.lower()
+                                    if email:
+                                        break
+
+                                if not email:
+                                    panel = await page.query_selector('div.m6QErb')
+                                    if panel:
+                                        t = await panel.inner_text()
+                                        candidate = extract_email(t)
+                                        if candidate and is_valid_email(candidate):
+                                            email = candidate.lower()
+
+                                if not email or email in existing:
+                                    continue
+
+                                # phone
+                                phone = None
+                                el = await page.query_selector('button[data-item-id^="phone:tel:"]')
+                                if el:
+                                    v = await el.get_attribute('data-item-id')
+                                    if v:
+                                        phone = v.replace('phone:tel:','').strip()
+
+                                lead = {
+                                    'business_name': name,
+                                    'email':         email,
+                                    'phone':         phone,
+                                    'city':          city,
+                                    'niche':         niche,
+                                    'status':        'pending',
+                                    'contacted':     False,
+                                    'scraped_at':    datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                                }
+                                leads.append(lead)
+                                existing.add(email)
+                                found += 1
+                                print(f"\n    ✅ {name} | {email}")
+
+                                if len(leads) % 10 == 0:
+                                    save(leads, output_file)
+
+                            except Exception:
+                                continue
+
+                        print(f"({found} found)")
+
+                    except Exception as e:
+                        print(f"⚠️  {str(e)[:60]}")
+
+                if len(leads) >= target:
+                    break
+
+        finally:
+            save(leads, output_file)
+            await browser.close()
+
+    print(f"\n{'='*55}")
+    print(f"✅ Done! Total: {len(leads)} | New: {len(leads)-initial}")
+    print(f"📁 File: {output_file}")
+
+
+def run_scrape(args):
+    country = resolve_country(args.country)
+    cities  = args.cities  if args.cities  else CITY_LISTS.get(country, [])
+    niches  = args.niches  if args.niches  else DEFAULT_NICHES
+    output  = args.output  if args.output  else f"{country}_leads.json"
+    target  = args.target
+    headless = getattr(args, 'headless', True)
+
+    if not cities:
+        print(f"❌ No cities found for country: {country}")
+        return
+
+    print(f"🌍 Country: {country.upper()}")
+    asyncio.run(_scrape(cities, niches, target, output, headless))
