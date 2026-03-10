@@ -289,18 +289,29 @@ async def _scrape(cities, niches, target, output_file, headless=True, no_website
                                 break
                             try:
                                 await listing.click()
-                                await maps_page.wait_for_timeout(2500)
+                                # Wait for the detail panel to load with the actual business name
+                                try:
+                                    await maps_page.wait_for_selector('h1', timeout=5000)
+                                except Exception:
+                                    pass
+                                await maps_page.wait_for_timeout(1500)
 
-                                # Business name
+                                # Business name — must be from detail panel, not search results header
                                 name = None
-                                for sel in ['h1', 'h1.DUwDid', 'h1.DUO9ee']:
+                                for sel in ['h1.DUwDid', 'h1.DUO9ee', 'h1.lMbq3e', 'h1']:
                                     el = await maps_page.query_selector(sel)
                                     if el:
                                         t = (await el.inner_text()).strip()
-                                        if t and len(t) > 1:
+                                        if t and len(t) > 2:
                                             name = clean_name(t)
                                             break
                                 if not name:
+                                    continue
+                                # Filter out Google Maps UI text mistaken as business names
+                                junk_names = {'results', 'more results', 'next page', 'all results',
+                                              'showing results', 'sponsored', 'advertisement', 'open now',
+                                              'closed', 'closes soon', 'opens soon'}
+                                if name.lower().strip() in junk_names or len(name.strip()) < 3:
                                     continue
 
                                 # Phone number
